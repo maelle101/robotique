@@ -92,6 +92,7 @@ elif args.mode == "walk":
     controls["step_height"] = p.addUserDebugParameter("step_height", 0, 0.4, 0.06)
     controls["step_max_amplitude"] = p.addUserDebugParameter("step_max_amplitude", 0, 0.1, 0.05)
 elif args.mode == "control":
+    last_points = None
     from pynput import keyboard
     keys = {
         'z': 0,
@@ -102,22 +103,23 @@ elif args.mode == "control":
         'e': 0,
         'r': 0,
         'm': 0,
+        't': 0,
+        'p': 0,
         keyboard.Key.space: 0,
     }
 
 
     def on_press(key):
-        if key == keyboard.Key.space:
+        if type(key) == keyboard.Key:
             keys[key] = 1
         else:
             keys[key.char] = 1
 
     def on_release(key):
-        if key == keyboard.Key.space:
+        if type(key) == keyboard.Key:
             keys[key] = 0
         else:
             keys[key.char] = 0
-
 
     listener = keyboard.Listener(
         on_press=on_press,
@@ -156,6 +158,32 @@ def walk(speed_x, speed_y, speed_rot, height, max_ampl, z):
         set_leg_angles(alphas, leg_id, targets, params)
         state = sim.setJoints(targets)
 
+def robotik():
+    last_points = None
+    for leg_id in range(6):
+        alphas = kinematics.computeIKOriented(
+                0.01 * math.sin(2 * math.pi * 0.5 * time.time() * 2),
+                0.02 * math.cos(2 * math.pi * 0.5 * time.time() * 2),
+                0.03 * math.sin(2 * math.pi * 0.2 * time.time() * 2),
+                leg_id,
+                params,
+            )
+        set_leg_angles(alphas, leg_id, targets, params)
+
+    leg = params.legs[0]
+    point = kinematics.computeDK(targets[leg[0]], targets[leg[1]], targets[leg[2]])
+
+    if last_points is None:
+        last_points = time.time(), absolute_position(0, point, sim.getRobotPose())
+    elif time.time() - last_points[0] > 0.1:
+        tip = absolute_position(0, point, sim.getRobotPose())
+        p.addUserDebugLine(last_points[1], tip, [1, 0, 0], 2., 10.)
+        last_points = time.time(), tip
+
+    # p.addUserDebugLine([0, 0, 0], getLegTip(), [1, 0, 0], 2., 10.)
+
+    #sim.setRobotPose([0, 0, 0.5], [0, 0, 0, 1])
+    state = sim.setJoints(targets)
 
 while True:
     targets = {}
@@ -254,15 +282,19 @@ while True:
         speed_x = (keys['z'] - keys['s']) * (1 / 2 if keys['q'] - keys['d'] != 0 else 1) * (1 + keys['m'] * 2)
         speed_y = (keys['q'] - keys['d']) * (1 / 2 if speed_x != 0 else 1) * (1 + keys['m'] * 2)
         speed_rot = (keys['a'] - keys['e']) / 2
-        height = 0.04 + keys[keyboard.Key.space] / 2
+        height = 0.04 + keys[keyboard.Key.space] / 8
         max_ampl = 0.06 + 0.04 * keys['m']
-        z = 0.06
+        z = 0.06 + 0.5 * keys['p']
 
         walk(speed_x, speed_y, speed_rot, height, max_ampl, z)
 
         angles = sim.getRobotPose()
         if keys['r']:
             sim.setRobotPose(angles[0], to_pybullet_quaternion(0, 0, angles[1][2]))
+
+        if keys['t']:
+            robotik()
+
         p.resetDebugVisualizerCamera(
             1.2, angles[1][2] * 180 / np.pi - 90, -20, angles[0])
     sim.tick()
